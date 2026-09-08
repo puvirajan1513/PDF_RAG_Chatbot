@@ -34,6 +34,12 @@ st.set_page_config(
     page_icon="📚",
     layout="wide"
 )
+# ==========================================
+# CHAT HISTORY
+# ==========================================
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 
 
@@ -46,6 +52,11 @@ st.write(
     "Upload multiple PDF documents and ask questions "
     "about their contents."
 )
+if st.button("🗑️ Clear Chat"):
+
+    st.session_state.chat_history = []
+
+    st.rerun()
 
 
 
@@ -166,37 +177,70 @@ if uploaded_files:
 
 
 
-# 9. QUESTION ANSWERING
-
+# ==========================================
+# 9. CHAT INTERFACE
+# ==========================================
 
 if "vectorstore" in st.session_state:
 
     st.divider()
 
-    st.subheader("💬 Ask a question")
+    st.subheader("💬 Chat with your PDFs")
 
-    question = st.text_input(
-        "Enter your question:"
+
+    # ==========================================
+    # DISPLAY PREVIOUS CHAT
+    # ==========================================
+
+    for message in st.session_state.chat_history:
+
+        with st.chat_message(message["role"]):
+
+            st.markdown(message["content"])
+
+
+    # ==========================================
+    # CHAT INPUT
+    # ==========================================
+
+    question = st.chat_input(
+        "Ask a question about your PDFs..."
     )
 
 
     if question:
 
+        # Display user question
+        with st.chat_message("user"):
 
-        # 10. RETRIEVE RELEVANT DOCUMENTS
-   
+            st.markdown(question)
+
+
+        # Save question
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": question
+        })
+
+
+        # ==========================================
+        # RETRIEVE RELEVANT CHUNKS
+        # ==========================================
 
         with st.spinner("🔍 Searching documents..."):
 
             results = (
                 st.session_state.vectorstore
-                .similarity_search(question, k=3)
+                .similarity_search(
+                    question,
+                    k=3
+                )
             )
 
 
-    
-        # 11. BUILD CONTEXT
-   
+        # ==========================================
+        # BUILD CONTEXT
+        # ==========================================
 
         context_parts = []
 
@@ -215,16 +259,31 @@ if "vectorstore" in st.session_state:
             context_parts.append(
                 f"Source: {source}\n"
                 f"Page: {page}\n"
-                f"Content:\n{result.page_content}"
+                f"Content:\n"
+                f"{result.page_content}"
             )
 
 
         context = "\n\n".join(context_parts)
 
 
-   
-        # 12. CREATE GEMINI
+        # ==========================================
+        # CONVERSATION HISTORY
+        # ==========================================
 
+        history_text = ""
+
+        for message in st.session_state.chat_history:
+
+            history_text += (
+                f"{message['role']}: "
+                f"{message['content']}\n"
+            )
+
+
+        # ==========================================
+        # GEMINI
+        # ==========================================
 
         llm = ChatGoogleGenerativeAI(
             model="gemini-3.6-flash",
@@ -232,40 +291,52 @@ if "vectorstore" in st.session_state:
         )
 
 
-  
-        # 13. CREATE PROMPT
-  
+        # ==========================================
+        # PROMPT
+        # ==========================================
 
         prompt = f"""
-You are a PDF question-answering assistant.
+You are a helpful PDF question-answering assistant.
 
 Answer the user's question using ONLY the
-information provided in the context.
+information contained in the retrieved PDF context.
 
-Do not make up information.
+Use the conversation history to understand
+follow-up questions.
 
-If the answer is not available in the context,
-say:
+Do not invent information.
+
+If the answer cannot be found in the retrieved
+PDF context, say:
 
 "I couldn't find the answer in the uploaded documents."
 
-Context:
+CONVERSATION HISTORY:
+================================
+
+{history_text}
+
+================================
+
+RETRIEVED PDF CONTEXT:
 ================================
 
 {context}
 
 ================================
 
-Question:
+CURRENT QUESTION:
 {question}
 
-Answer:
+================================
+
+Answer clearly and concisely.
 """
 
 
-      
-        # 14. GENERATE ANSWER
-    
+        # ==========================================
+        # GENERATE ANSWER
+        # ==========================================
 
         with st.spinner("🤖 Generating answer..."):
 
@@ -273,6 +344,7 @@ Answer:
 
 
         answer = response.content
+
 
         # Handle Gemini structured response
         if isinstance(answer, list):
@@ -285,40 +357,49 @@ Answer:
             )
 
 
-     
-        # 15. DISPLAY ANSWER
-    
+        # ==========================================
+        # DISPLAY ANSWER
+        # ==========================================
 
-        st.subheader("💬 Answer")
+        with st.chat_message("assistant"):
 
-        st.write(answer)
-
-
-        # 16. DISPLAY SOURCES
+            st.markdown(answer)
 
 
-        st.subheader("📚 Sources")
+        # Save answer
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": answer
+        })
 
-        shown_sources = set()
 
-        for result in results:
+        # ==========================================
+        # SOURCES
+        # ==========================================
 
-            source = result.metadata.get(
-                "source",
-                "Unknown"
-            )
+        with st.expander("📚 View Sources"):
 
-            page = result.metadata.get(
-                "page",
-                "Unknown"
-            )
+            shown_sources = set()
 
-            source_key = (source, page)
+            for result in results:
 
-            if source_key not in shown_sources:
-
-                st.write(
-                    f"📄 **{source}** — Page {page}"
+                source = result.metadata.get(
+                    "source",
+                    "Unknown"
                 )
 
-                shown_sources.add(source_key)
+                page = result.metadata.get(
+                    "page",
+                    "Unknown"
+                )
+
+                source_key = (source, page)
+
+                if source_key not in shown_sources:
+
+                    st.write(
+                        f"📄 **{source}** "
+                        f"— Page {page}"
+                    )
+
+                    shown_sources.add(source_key)
