@@ -20,6 +20,12 @@ from langchain_google_genai import (
 load_dotenv()
 
 api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    # Streamlit Community Cloud stores secrets in st.secrets rather than .env.
+    try:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+    except (KeyError, FileNotFoundError):
+        api_key = None
 
 if not api_key:
     st.error("❌ GOOGLE_API_KEY not found in .env")
